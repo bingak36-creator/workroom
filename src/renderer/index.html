@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'"><title>Workroom</title></head>
+<body><div id="app"></div><div id="toast" role="status" aria-live="polite"></div>
+<dialog id="task-dialog"><form id="task-form"><div class="eyebrow">NEW TASK</div><h2>새 작업 만들기</h2><label>작업 이름<input name="title" required maxlength="120" placeholder="예: 로그인 화면 개선"></label><label>목표와 완료 조건<textarea name="objective" rows="5" maxlength="12000" placeholder="어떤 결과가 필요하고, 무엇을 확인하면 완료인가요?"></textarea></label><div class="dialog-actions"><button type="button" id="dialog-cancel">취소</button><button class="primary" type="submit">작업 저장</button></div></form></dialog>
+<script type="module" src="./main.ts"></script></body></html>
