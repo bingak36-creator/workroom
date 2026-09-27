@@ -20,6 +20,11 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Check Electron executable
+        run: |
+          Get-Item .\node_modules\electron\dist\electron.exe | Select-Object FullName,Length
+          & .\node_modules\electron\dist\electron.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build and smoke test Windows x64 preview
         env:
           DEBUG: pw:browser*
