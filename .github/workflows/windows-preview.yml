@@ -20,6 +20,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Install Electron binary
+        run: npm run setup:electron
       - name: Check Electron executable
         run: |
           Get-Item .\node_modules\electron\dist\electron.exe | Select-Object FullName,Length

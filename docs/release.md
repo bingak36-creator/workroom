@@ -46,6 +46,7 @@ Windows x64에서 Node.js 22.12 이상을 설치하고 프로젝트 루트에서
 
 ```powershell
 npm ci
+npm run setup:electron
 npm run package:win
 ```
 
