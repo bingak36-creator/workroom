@@ -27,13 +27,13 @@ npm run package:mac
 
 순서: 릴리스 정적 검사 → 타입검사·테스트·빌드 → 실제 소스 앱 UI 검사 → 모의 터널 UI 검사 → DMG/ZIP 패키징 → 패키지 앱 UI 검사 → ad-hoc 서명 무결성 검사 → SHA-256 및 manifest 생성.
 
-기본 출력은 기존 `release/`와 분리한 `release-candidate/`입니다. 이전 rc.2 검증 후보는 `WORKROOM_OUTPUT_DIR=release-rc2 npm run package:mac`으로 별도 경로에 만들었습니다.
+기본 출력은 기존 `release/`와 분리한 `release-candidate/`입니다. rc.3 검증 후보는 `WORKROOM_OUTPUT_DIR=release-rc3-mac npm run package:mac`으로 별도 경로에 만들었습니다.
 
 ```text
-release-rc2/
+release-rc3-mac/
   mac-arm64/Workroom.app
-  Workroom-0.3.0-rc.2-arm64-preview.dmg
-  Workroom-0.3.0-rc.2-arm64-preview.zip
+  Workroom-0.3.0-rc.3-arm64-preview.dmg
+  Workroom-0.3.0-rc.3-arm64-preview.zip
   SHA256SUMS.txt
   release-manifest.json
 ```
