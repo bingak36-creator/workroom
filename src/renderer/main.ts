@@ -49,7 +49,7 @@ function folderView(): string {
   const project=data.projects.find(p=>p.id===projectId);
   if(!project)return '';
   const folders=project.approvedFolders??[];
-  return '<section class="approved-folders"><h3>접근 승인 폴더</h3><p>승인된 폴더 안의 파일만 도구로 읽거나 변경할 수 있습니다. /는 프로젝트 전체입니다.</p><form id="folder-form"><input name="folder" aria-label="승인할 폴더" placeholder="폴더 경로 또는 /" required><button type="submit">폴더 승인</button></form>' + folders.map(f=>'<div><code>'+escape(f||'/')+'</code> <span><button data-open-folder="'+escape(f)+'">열기</button> <button data-revoke-folder="'+escape(f)+'">승인 취소</button></span></div>').join('') + '</section>';
+  return '<section class="approved-folders"><h3>접근 승인 폴더</h3><p>승인된 폴더 안의 파일만 도구로 읽거나 변경할 수 있습니다. /는 프로젝트 전체입니다.</p><form id="folder-form" data-project="'+project.id+'"><input id="approved-folder-path" name="folder" aria-label="승인할 폴더" placeholder="폴더 경로 또는 /" required><button type="submit">폴더 승인</button></form>' + folders.map(f=>'<div><code>'+escape(f||'/')+'</code> <span><button data-open-folder="'+escape(f)+'">열기</button> <button data-revoke-folder="'+escape(f)+'">승인 취소</button></span></div>').join('') + '</section>';
 }
 function filesView(): string {
   return `<div class="section-heading"><div><div class="eyebrow">PROJECT FILES</div><h2>파일 둘러보기</h2><p>텍스트 미리보기 · 최대 256KB · 폴더당 최대 500개 표시</p></div><button data-action="refresh-files">새로고침</button></div><div class="file-workspace"><div class="file-list"><div class="file-path">${escape(folder||'/')} ${folder?'<button data-action="parent-folder" aria-label="상위 폴더">↑</button>':''}</div>${entries.map(e=>`<button class="file-row ${preview?.path===(folder?folder+'/':'')+e.name?'selected':''}" data-file="${escape(e.name)}" data-directory="${e.directory}"><span>${e.directory?'▸':'≡'}</span>${escape(e.name)}${e.directory?'<small>/</small>':''}</button>`).join('')}</div><div class="file-preview">${fileError?`<div class="inline-error">${escape(fileError)}</div>`:preview?`<header>${escape(preview.path)}<span>UTF-8</span></header><pre>${escape(preview.content)}</pre>`:empty('파일을 선택하세요','승인된 프로젝트 안의 텍스트 파일을 읽습니다.','≡')}</div></div>`;
@@ -85,9 +85,10 @@ function activityView(): string {
   return `<div class="section-heading"><div><div class="eyebrow">ACTIVITY LOG</div><h2>활동 기록</h2><p>실제로 수신한 MCP 도구 호출을 표시합니다. 최근 200개 보관.</p></div></div>${logs.length?`<div class="activity-list">${logs.map(a=>`<div><span class="activity-dot ${a.ok?'':'error'}"></span><code>${escape(a.tool)}</code><span>${escape(a.detail)}</span><time>${time(a.at)}</time></div>`).join('')}</div>`:empty('아직 기록이 없습니다','ChatGPT가 Workroom 도구를 호출하면 이곳에 기록됩니다.','◷')}`;
 }
 function render(): void {
-  const preservedInputs=tab==='connect' ? [...root.querySelectorAll<HTMLInputElement>('#tunnel-form input')] : [];
-  const focused=document.activeElement;
   const project=data.projects.find(p=>p.id===projectId);
+  const preservedInputs=tab==='connect' ? [...root.querySelectorAll<HTMLInputElement>('#tunnel-form input')]
+    : root.querySelector<HTMLFormElement>('#folder-form')?.dataset.project===projectId ? [...root.querySelectorAll<HTMLInputElement>('#folder-form input')] : [];
+  const focused=document.activeElement;
   const pending=data.jobs.filter(j=>j.state==='pending').length;
   const standalone=tab==='connect';
   const content=tab==='connect'?connectionView():!project?welcome():tab==='files'?folderView()+filesView():tab==='jobs'?jobsView():tab==='activity'?activityView():taskView()+folderView();

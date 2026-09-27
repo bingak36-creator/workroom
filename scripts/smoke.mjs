@@ -60,10 +60,7 @@ try{
   const denied=await rpc('tools/call',{name:'file_propose',arguments:{projectId:p.id,requestId:randomUUID(),path:'no.txt',content:'no',expectedHash:null}});assert.equal(denied.isError,true);
   await page.locator('[name=folder]').fill('/');await page.locator('#folder-form button').click();
   await until(async()=>(await snapshot()).projects[0].approvedFolders.includes(''),'folder approved').catch(async error=>{
-    let direct;
-    try { direct=await page.evaluate(id=>window.workroom.approveFolder(id,''),p.id); }
-    catch(err) { direct=String(err); }
-    console.error('Folder approval diagnostic:',JSON.stringify({project:(await snapshot()).projects[0],toast:await page.locator('#toast').textContent(),direct}));
+    console.error('Folder approval diagnostic:',JSON.stringify({project:(await snapshot()).projects[0],input:await page.locator('#approved-folder-path').inputValue(),toast:await page.locator('#toast').textContent()}));
     throw error;
   });
   await page.locator('#writable').check();await until(async()=>(await snapshot()).projects[0].writable,'write enabled');
