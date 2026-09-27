@@ -1,8 +1,8 @@
 # Workroom
 
-ChatGPT에서 대화하고, 선택한 로컬 프로젝트의 파일·작업·실행 결과를 관리하는 macOS 데스크톱 앱입니다. MCP 도구 서버를 제공하며 모델 API나 Codex CLI를 직접 실행하지 않습니다.
+ChatGPT에서 대화하고, 선택한 로컬 프로젝트의 파일·작업·실행 결과를 관리하는 데스크톱 앱입니다. MCP 도구 서버를 제공하며 모델 API나 Codex CLI를 직접 실행하지 않습니다.
 
-현재 소스 버전은 **0.3.0-rc.2**, 검증 대상은 **macOS Apple Silicon**입니다. 공개 게시·Developer ID 서명·Apple 공증 완료를 뜻하는 버전이 아닙니다. 토큰 추정 기능은 제거했습니다.
+현재 소스 버전은 **0.3.0-rc.3**이며 macOS Apple Silicon과 Windows x64 프리뷰 빌드 경로를 제공합니다. 프리뷰는 macOS Developer ID·Apple 공증 또는 Windows Authenticode 서명을 받은 정식 배포본이 아닙니다. 토큰 추정 기능은 제거했습니다.
 
 ## 시작하기
 
@@ -16,7 +16,7 @@ npm run verify
 npm start
 ```
 
-개발 UI는 `npm run dev`, 실제 Electron UI/MCP 검증은 `npm run smoke`, 모의 터널 UI 검증은 `npm run smoke:tunnel`입니다. 로컬 배포 후보 DMG·ZIP은 `npm run package:mac`으로 생성합니다. [배포 절차](docs/release.md)를 먼저 확인하세요.
+개발 UI는 `npm run dev`, 실제 Electron UI/MCP 검증은 `npm run smoke`입니다. macOS DMG·ZIP은 `npm run package:mac`, Windows x64 NSIS 설치 프로그램·ZIP은 Windows에서 `npm run package:win`으로 생성합니다. macOS 모의 터널 UI 검증은 `npm run smoke:tunnel`입니다. [배포 절차](docs/release.md)를 먼저 확인하세요.
 
 ## 기본 작업 흐름
 
@@ -24,11 +24,11 @@ npm start
 
 | 승인 모드 | 동작 |
 |---|---|
-| 자동승인 | 승인 폴더의 파일 수정·삭제와 macOS 폴더 격리 명령을 자동 실행합니다. |
+| 자동승인 | 승인 폴더의 파일 수정·삭제를 자동 실행합니다. macOS에서는 폴더 격리 명령도 자동 실행합니다. Windows에서는 자동 셸 명령을 거부합니다. |
 | 삭제만 승인 | 파일 수정은 자동, 삭제와 명령은 건별 승인합니다. |
 | 전부 승인 — 기본 | 파일 수정·삭제와 명령을 건별 승인합니다. |
 
-자동 명령은 macOS 폴더 격리로 승인 폴더 밖 파일 읽기·쓰기를 제한합니다. 지원되지 않는 OS에서는 자동 명령이 실패합니다. **건별 승인한 명령은 OS 사용자 권한으로 실행되며 프로젝트 밖 파일과 네트워크에도 접근할 수 있습니다.** 재시작하면 변경 권한은 읽기 전용으로, 자동승인 모드는 전부 승인으로 돌아갑니다. 기존 all·edits 설정도 전부 승인으로 이전됩니다.
+macOS 자동 명령은 폴더 격리로 승인 폴더 밖 파일 읽기·쓰기를 제한합니다. Windows에서는 같은 격리를 제공하지 않아 자동 명령을 접수하지 않습니다. **건별 승인한 명령은 OS 사용자 권한으로 실행되며 프로젝트 밖 파일과 네트워크에도 접근할 수 있습니다.** Windows에서는 PowerShell을 사용합니다. 재시작하면 변경 권한은 읽기 전용으로, 자동승인 모드는 전부 승인으로 돌아갑니다. 기존 all·edits 설정도 전부 승인으로 이전됩니다.
 
 실행 기록에서 `승인 대기(pending)`, `실행 대기(queued)`, `진행 중(running)`, `완료/실패/취소`를 구분합니다. 자동 실행되는 요청은 최대 15초까지 결과를 기다려 한 번의 호출로 최종 상태를 반환하고, 승인 대기 요청은 즉시 반환합니다. 응답이 `done`일 때만 완료입니다. 그 밖의 상태면 ChatGPT가 `job_get`으로 실제 결과를 확인한 다음 `task_update`로 사실과 다음 단계를 저장해야 합니다.
 
@@ -46,7 +46,7 @@ npm start
 
 앱의 **ChatGPT 연결** 화면에서 계정·워크스페이스에 제공되는 공식 연결 경로를 확인합니다. OpenAI Platform에서 사용할 워크스페이스와 연결된 터널을 만들고, 해당 터널을 사용할 권한이 있는 런타임 API 키를 준비합니다. Admin API 키나 다른 사람의 계정·키를 공유하지 않습니다.
 
-`tunnel-client`를 설치한 뒤 **설치 다시 확인**을 누릅니다. 앱은 `/opt/homebrew/bin/tunnel-client`, `/usr/local/bin/tunnel-client`에서 실행 파일을 확인합니다. 터널 ID와 런타임 키를 입력하고 연결 상태를 확인한 다음, ChatGPT의 플러그인 연결 화면에서 Tunnel 방식과 터널 ID로 등록합니다. `127.0.0.1` 주소나 API 키를 ChatGPT 등록 필드에 넣는 방식과 혼동하지 마세요.
+`tunnel-client`를 설치한 뒤 **설치 다시 확인**을 누릅니다. macOS에서는 `/opt/homebrew/bin/tunnel-client`와 `/usr/local/bin/tunnel-client`를 확인합니다. Windows에서는 공식 배포의 `tunnel-client.exe`를 `%APPDATA%\Workroom\bin\tunnel-client.exe`에 둡니다. 터널 ID와 런타임 키를 입력하고 연결 상태를 확인한 다음, ChatGPT의 플러그인 연결 화면에서 Tunnel 방식과 터널 ID로 등록합니다. `127.0.0.1` 주소나 API 키를 ChatGPT 등록 필드에 넣는 방식과 혼동하지 마세요.
 
 런타임 키는 자식 프로세스 환경 변수로 전달하며 앱 자체 상태·작업 기록·원본 로그에 저장하지 않습니다. 입력란은 비우고 터널 ID만 보존합니다. 중지·재시작 후에는 키를 다시 입력해야 합니다. 로컬 서버 준비, 터널 준비, ChatGPT 플러그인 등록 성공은 서로 다른 상태입니다. 실제 계정에서 도구 호출까지 확인해야 연결 검증이 끝납니다.
 
@@ -78,7 +78,7 @@ npm start
 
 MCP 서버는 loopback에만 바인딩하고 시작마다 새 비밀값을 사용합니다. 서버 요청 크기·시간·연결 수를 제한하고 최종 보안 헤더를 설정합니다. UI는 별도 프로토콜과 CSP, 샌드박스, 메인 프레임 IPC 검증을 사용합니다.
 
-데이터는 macOS `~/Library/Application Support/Workroom`에 저장합니다. 소유자 전용 파일 권한을 사용하지만 별도 암호화는 없습니다. 선택한 파일·작업·출력은 MCP 요청에 응답하면서 연결한 호스트로 전송될 수 있습니다. 로컬 저장과 외부 전송을 혼동하지 마세요.
+데이터는 macOS `~/Library/Application Support/Workroom`, Windows `%APPDATA%\Workroom`에 저장합니다. macOS에서는 소유자 전용 파일 권한을 설정하고 Windows에서는 사용자 프로필 ACL을 상속합니다. 별도 암호화는 없습니다. 선택한 파일·작업·출력은 MCP 요청에 응답하면서 연결한 호스트로 전송될 수 있습니다. 로컬 저장과 외부 전송을 혼동하지 마세요.
 
 프로젝트 100개, 작업 2,000개, 표시 요청 200개, 활동 기록 200개, 전체 상태 파일 32MiB로 제한합니다. 중복 실행 방지 기록은 10,000개까지 보관하고, 가득 차면 실행 기록에 없고 하루 이상 지난 가장 오래된 종료 기록부터 정리합니다. 명령은 120초, 총 출력 2MiB, 보관 출력 32,000자까지이며 전체 동시 실행 2개·프로젝트별 직렬 실행입니다. 앱이 로케일 없이 실행된 경우 macOS에서는 명령에 UTF-8 문자 로케일(`LC_CTYPE=en_US.UTF-8`)을 지정합니다. 대화형 입력과 영구 백그라운드 서버 실행 용도가 아닙니다.
 
@@ -86,6 +86,6 @@ MCP 서버는 loopback에만 바인딩하고 시작마다 새 비밀값을 사�
 
 ## 배포 후보와 실제 검증
 
-`npm run verify`는 타입검사·테스트·빌드, `npm run package:mac`은 UI 검사와 후보 패키지 검증을 묶어 실행합니다. 결과는 `artifacts/release-audit/`에 기록하며 설치 후보는 `release-candidate/`에 생성합니다. 현재 실행 중인 앱이 소스 수정만으로 자동 교체되지는 않습니다.
+`npm run verify`는 타입검사·테스트·빌드입니다. `npm run package:mac`과 Windows에서의 `npm run package:win`은 UI 검사와 후보 패키지 검증을 묶어 실행합니다. 결과는 `artifacts/release-audit/`에 기록합니다. 현재 실행 중인 앱이 소스 수정만으로 자동 교체되지는 않습니다.
 
 공개 배포용 `npm run release:mac`은 Developer ID 서명·공증 설정이 없으면 중단합니다. 준비된 스크립트와 실제 서명·공증·공개 게시 완료는 구분해야 합니다. 앱을 자동 게시하지 않습니다. 전체 절차와 남은 배포 요건은 [docs/release.md](docs/release.md), 실제 검사 기록은 [docs/verification.md](docs/verification.md)에 있습니다.

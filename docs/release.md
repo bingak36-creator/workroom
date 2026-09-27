@@ -1,6 +1,6 @@
 # 릴리스 절차
 
-대상은 macOS Apple Silicon입니다. Windows/Linux/Intel Mac은 검증된 배포 대상으로 표시하지 않습니다. 버전 `0.3.0-rc.2`는 배포 후보이며, 서명·공증 없는 프리뷰를 정식 출시본으로 안내하면 안 됩니다.
+대상은 macOS Apple Silicon과 Windows x64입니다. Linux/Intel Mac/Windows ARM은 검증된 배포 대상으로 표시하지 않습니다. 버전 `0.3.0-rc.3`은 배포 후보이며, 서명·공증 없는 프리뷰를 정식 출시본으로 안내하면 안 됩니다.
 
 ## 개발 환경 준비
 
@@ -27,7 +27,7 @@ npm run package:mac
 
 순서: 릴리스 정적 검사 → 타입검사·테스트·빌드 → 실제 소스 앱 UI 검사 → 모의 터널 UI 검사 → DMG/ZIP 패키징 → 패키지 앱 UI 검사 → ad-hoc 서명 무결성 검사 → SHA-256 및 manifest 생성.
 
-기본 출력은 기존 `release/`와 분리한 `release-candidate/`입니다. 이번 rc.2 검증 후보는 `WORKROOM_OUTPUT_DIR=release-rc2 npm run package:mac`으로 별도 경로에 만들었습니다.
+기본 출력은 기존 `release/`와 분리한 `release-candidate/`입니다. 이전 rc.2 검증 후보는 `WORKROOM_OUTPUT_DIR=release-rc2 npm run package:mac`으로 별도 경로에 만들었습니다.
 
 ```text
 release-rc2/
@@ -39,6 +39,30 @@ release-rc2/
 ```
 
 이 후보는 로컬 ad-hoc 서명이며 Developer ID와 Apple 공증을 갖춘 정식 배포본이 아닙니다. Gatekeeper가 차단하거나 경고할 수 있습니다. 보안 기능을 전역 해제하거나 검역 속성을 무조건 제거하도록 안내하지 마세요. 불특정 사용자에게 배포하려면 아래 정식 경로를 완료합니다.
+
+## Windows x64 프리뷰
+
+Windows x64에서 Node.js 22.12 이상을 설치하고 프로젝트 루트에서 다음을 실행합니다.
+
+```powershell
+npm ci
+npm run package:win
+```
+
+`package:win`은 릴리스 정적 검사 → 타입 검사·테스트·빌드 → Electron UI·MCP 검사 → NSIS 설치 프로그램과 ZIP 패키징 → 패키지 앱 UI·MCP 검사 → SHA-256 및 manifest 생성을 수행합니다. 기본 출력은 `release-win-preview/`입니다. GitHub Actions의 **Windows preview** 작업은 같은 경로로 빌드하고 검증 결과를 아티팩트로 보관합니다.
+
+```text
+release-win-preview/
+  win-unpacked/Workroom.exe
+  Workroom-0.3.0-rc.3-x64-preview.exe
+  Workroom-0.3.0-rc.3-x64-preview.zip
+  SHA256SUMS.txt
+  release-manifest.json
+```
+
+Windows 프리뷰는 **Authenticode 미서명**입니다. Windows SmartScreen이 경고하거나 실행을 차단할 수 있습니다. 다운로드한 파일은 공개된 SHA-256과 대조하세요. 앱은 사용자별 설치가 기본이며 Windows 계정의 `%APPDATA%\Workroom`에 데이터를 저장합니다. 공식 `tunnel-client.exe`를 사용하는 경우 `%APPDATA%\Workroom\bin\tunnel-client.exe`에 둔 뒤 앱에서 **설치 다시 확인**을 누릅니다.
+
+Windows에서는 파일 수정·삭제의 자동승인은 지원하지만, 승인 폴더 밖 파일 접근을 차단하는 자동 **셸 명령 격리**가 없어서 자동 셸 명령 요청은 거부합니다. 셸 명령이 필요하면 **삭제만 승인** 또는 **전부 승인** 모드에서 PowerShell 명령을 건별 검토해 실행합니다. 건별 승인한 명령은 Windows 사용자 권한으로 실행됩니다.
 
 ## 정식 서명 릴리스
 
@@ -57,7 +81,7 @@ npm run release:mac
 
 ## 업그레이드와 롤백
 
-현재 실행 중인 Workroom을 임의로 재시작하거나 사용자 데이터 위에 테스트 앱을 실행하지 않습니다. 앱을 종료한 상태에서 `~/Library/Application Support/Workroom`을 사용자가 선택한 안전한 위치에 백업합니다. 새 앱 시작 시 권한은 읽기 전용으로 초기화하며, 모두 자동 모드는 해제합니다. 작업·체크포인트는 보존하되 미완료 요청은 취소합니다.
+현재 실행 중인 Workroom을 임의로 재시작하거나 사용자 데이터 위에 테스트 앱을 실행하지 않습니다. 앱을 종료한 상태에서 macOS의 `~/Library/Application Support/Workroom` 또는 Windows의 `%APPDATA%\Workroom`을 사용자가 선택한 안전한 위치에 백업합니다. 새 앱 시작 시 권한은 읽기 전용으로 초기화하며, 모두 자동 모드는 해제합니다. 작업·체크포인트는 보존하되 미완료 요청은 취소합니다.
 
 문제가 있으면 앱을 종료하고 이전 앱과 해당 버전에서 백업한 데이터로 복원합니다. 새 형식의 데이터를 검증 없이 이전 앱에 덮어넣지 마세요. 원본 소스 점검 백업은 `artifacts/release-audit/baseline-*`에 있으며 패키지에는 포함되지 않습니다.
 

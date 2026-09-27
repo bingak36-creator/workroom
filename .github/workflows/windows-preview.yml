@@ -21,6 +21,8 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Build and smoke test Windows x64 preview
+        env:
+          DEBUG: pw:browser*
         run: npm run package:win
       - name: Upload preview and reports
         if: always()
