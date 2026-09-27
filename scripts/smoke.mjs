@@ -104,7 +104,7 @@ try{
     assert.equal(pending.state,'pending');
     await page.locator(`[data-approve="${pending.id}"]`).click();
   }
-  let running;await until(async()=>(running=(await snapshot()).jobs.find(j=>j.state==='running'&&j.output.includes('started'))),'running output');
+  let running;await until(async()=>(running=(await snapshot()).jobs.find(j=>j.state==='running'&&(windows||j.output.includes('started')))),windows?'running command':'running output');
   await page.locator(`[data-cancel-job="${running.id}"]`).click();
   if(windows)assert.equal((await jobDone(running.id)).state,'cancelled');
   else assert.equal((await runningCall).state,'cancelled','UI stop releases the held tool call');
