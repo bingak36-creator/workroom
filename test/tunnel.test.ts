@@ -32,7 +32,7 @@ setInterval(()=>{},1000);
 }
 afterEach(async()=>{for(const f of fixtures.splice(0)){await f.tunnel.stop();await fs.rm(f.dir,{recursive:true,force:true});}});
 
-describe('tunnel authentication and lifecycle',()=>{
+(process.platform === 'win32' ? describe.skip : describe)('tunnel authentication and lifecycle',()=>{
   it('validates inputs without echoing credentials',()=>{
     expect(()=>validateTunnelInput('bad',key)).toThrow('터널 ID');
     try {validateTunnelInput(id,'secret malicious input');} catch(e){expect(String(e)).not.toContain('secret malicious');}

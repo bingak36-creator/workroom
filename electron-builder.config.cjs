@@ -30,6 +30,11 @@ module.exports = {
     entitlementsInherit: 'build/entitlements.mac.plist',
     darkModeSupport: false
   },
+  win: {
+    target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }],
+    icon: 'build/icon.ico'
+  },
+  nsis: { oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true },
   dmg: { sign: signed, title: 'Workroom ${version}', contents: [{ x: 150, y: 180 }, { x: 430, y: 180, type: 'link', path: '/Applications' }] },
   publish: null
 };

@@ -1,0 +1,37 @@
+name: Windows preview
+
+on:
+  push:
+    branches: [windows-preview]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build and smoke test Windows x64 preview
+        run: npm run package:win
+      - name: Upload preview and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workroom-windows-preview
+          path: |
+            release-win-preview/*.exe
+            release-win-preview/*.zip
+            release-win-preview/SHA256SUMS.txt
+            release-win-preview/release-manifest.json
+            artifacts/release-audit/*.json
+            artifacts/release-audit/*.png
+          if-no-files-found: warn

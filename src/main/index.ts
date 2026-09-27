@@ -76,7 +76,9 @@ else {
     handle('project:writable', (p, v) => service.writable(id.parse(p), z.boolean().parse(v)));
     handle('project:approval-mode', async (p, value) => {
       const projectId = id.parse(p); const mode = z.enum(['review','delete','automatic']).parse(value);
-      if (mode === 'automatic' && !await confirm('파일 변경과 삭제를 자동 승인할까요?', '승인된 폴더의 파일 변경과 삭제만 자동 처리합니다. 셸 명령은 접근 범위를 검증할 수 없어 건별 승인이 필요합니다.', '자동 승인 허용')) return;
+      if (mode === 'automatic' && !await confirm('파일 변경과 삭제를 자동 승인할까요?', process.platform === 'darwin'
+        ? '승인된 폴더의 파일 변경·삭제와 폴더 격리된 셸 명령을 자동 실행합니다. 앱을 재시작하면 해제됩니다.'
+        : '승인된 폴더의 파일 변경·삭제를 자동 실행합니다. Windows에서는 자동 셸 명령을 지원하지 않습니다. 앱을 재시작하면 해제됩니다.', '자동 승인 허용')) return;
       await service.setApprovalMode(projectId, mode);
     });
     handle('project:folder-approve', (p,r) => service.approveFolder(id.parse(p), relative.parse(r)));

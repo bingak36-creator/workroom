@@ -5,6 +5,7 @@ release-candidate/
 release-public/
 release-rc2/
 release-rebuild*/
+release-win*/
 artifacts/
 coverage/
 *.log

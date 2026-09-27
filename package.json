@@ -1,6 +1,6 @@
 {
   "name": "workroom-desktop",
-  "version": "0.3.0-rc.2",
+  "version": "0.3.0-rc.3",
   "private": true,
   "description": "Local project, approval and task companion for ChatGPT over MCP",
   "author": "Workroom",
@@ -18,6 +18,7 @@
     "verify": "node scripts/verify.mjs",
     "check:release": "node scripts/check-release.mjs",
     "package:mac": "node scripts/release.mjs",
+    "package:win": "node scripts/release-win.mjs",
     "release:mac": "node scripts/release.mjs --signed",
     "smoke": "node scripts/smoke.mjs",
     "smoke:tunnel": "node scripts/tunnel-smoke.mjs",

@@ -36,6 +36,11 @@ describe('File boundaries and data integrity',()=>{
     await fs.link(path.join(temp,'outside.txt'),path.join(temp,'project','hardlink.txt'));
     for(const name of ['../outside.txt',path.join(temp,'outside.txt'),'.env','.envbackup','.ssh/id_rsa','secret.p8','escape.txt','hardlink.txt','.workroom-state.tmp']) await expect(files.readFile(work.project(projectId),name)).rejects.toThrow();
   });
+  it('rejects Windows device names, alternate streams and ambiguous trailing characters',async()=>{
+    if(process.platform!=='win32')return;
+    for(const name of ['CON','aux.txt','report.txt:secret','trailing.','trailing ','folder/NUL.log'])
+      await expect(files.resolveFile(work.project(projectId),name,true)).rejects.toThrow('허용되지 않는 경로');
+  });
   it('refuses a FIFO without blocking a file read',async()=>{
     if(process.platform==='win32')return;
     execFileSync('/usr/bin/mkfifo',[path.join(temp,'project','pipe')]);
@@ -152,10 +157,23 @@ describe('Explicit approval modes and asynchronous execution',()=>{
     expect(work.job(j.id).content).toBeUndefined();expect(work.job(j.id).before).toBeUndefined();
   });
   it('requires manual approval for commands by default',async()=>{
-    await work.writable(projectId,true);const j=await command('printf approved > command.txt');
+    await work.writable(projectId,true);const j=await command(process.platform==='win32'?"[System.IO.File]::WriteAllText('command.txt','approved')":'printf approved > command.txt');
     expect(j.state).toBe('pending');await expect(fs.stat(path.join(temp,'project','command.txt'))).rejects.toThrow();
     await work.decide(j.id,true);expect((await completed(j.id)).exitCode).toBe(0);
     expect(await fs.readFile(path.join(temp,'project','command.txt'),'utf8')).toBe('approved');
+  });
+  it('on Windows keeps automatic shell commands blocked and allows reviewed PowerShell',async()=>{
+    if(process.platform!=='win32')return;
+    await work.writable(projectId,true);
+    await work.setApprovalMode(projectId,'automatic');
+    await expect(command('Get-Content command.txt')).rejects.toThrow('폴더 격리');
+    expect(store.data.jobs).toHaveLength(0);
+    await work.setApprovalMode(projectId,'review');
+    const job=await command("[System.IO.File]::WriteAllText('reviewed.txt','ok')");
+    expect(job.state).toBe('pending');
+    await work.decide(job.id,true);
+    expect((await completed(job.id)).state).toBe('done');
+    expect(await fs.readFile(path.join(temp,'project','reviewed.txt'),'utf8')).toBe('ok');
   });
   it('rejecting a command has no command side effect',async()=>{
     await work.writable(projectId,true);const j=await command('touch forbidden');await work.decide(j.id,false);
@@ -168,25 +186,28 @@ describe('Explicit approval modes and asynchronous execution',()=>{
     expect(requiresFileReview('scripts/build.js','content')).toBe(true);
   });
   it('all mode executes commands including explicitly requested deletion',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);await work.setApprovalMode(projectId,'automatic');
     const first=await write('victim.txt','remove me');await completed(first.id);
     const j=await command('rm -f victim.txt');expect((await completed(j.id)).state).toBe('done');
     await expect(fs.stat(path.join(temp,'project','victim.txt'))).rejects.toThrow();
   });
   it('never interprets a queued command as completed',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);await work.setApprovalMode(projectId,'automatic');
     const j=await command('printf started; sleep 30');expect(terminal(j.state)).toBe(false);
     await expect.poll(()=>work.jobSnapshot(j.id).output).toContain('started');
     await work.cancel(j.id);expect((await completed(j.id)).state).toBe('cancelled');
   });
   it('duplicate approvals cannot execute a command twice',async()=>{
-    await work.writable(projectId,true);const j=await command('printf once >> count.txt');
+    await work.writable(projectId,true);const j=await command(process.platform==='win32'?"[System.IO.File]::AppendAllText('count.txt','once')":'printf once >> count.txt');
     const results=await Promise.allSettled([work.decide(j.id,true),work.decide(j.id,true)]);
     expect(results.filter(r=>r.status==='rejected')).toHaveLength(1);await completed(j.id);
     expect(await fs.readFile(path.join(temp,'project','count.txt'),'utf8')).toBe('once');
     expect(work.paused).toBe(false);
   });
   it('serializes jobs within each project and cancelling queued work prevents execution',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);await work.setApprovalMode(projectId,'automatic');
     const first=await command('printf started; sleep 30');
     await expect.poll(()=>work.jobSnapshot(first.id).output).toContain('started');
@@ -195,6 +216,7 @@ describe('Explicit approval modes and asynchronous execution',()=>{
     expect(work.job(second.id).state).toBe('cancelled');await expect(fs.stat(path.join(temp,'project','should-not-exist'))).rejects.toThrow();
   });
   it('revoking permission cancels running and queued work and re-enabling does not replay it',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);await work.setApprovalMode(projectId,'automatic');
     const first=await command('printf started; sleep 30');await expect.poll(()=>work.jobSnapshot(first.id).output).toContain('started');
     const second=await command('touch forbidden');await work.writable(projectId,false);await work.waitForIdle();
@@ -207,6 +229,7 @@ describe('Explicit approval modes and asynchronous execution',()=>{
     expect(work.job(j.id).state).toBe('cancelled');await expect(write()).rejects.toThrow('일시 정지');
   });
   it('bounds command output and preserves useful UTF-8',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);await work.setApprovalMode(projectId,'automatic');
     const j=await command('printf "한글 👋"');const result=await completed(j.id);
     expect(result.output).toBe('한글 👋');expect(result.exitCode).toBe(0);
@@ -321,6 +344,7 @@ describe('Durability, idempotency and lifecycle',()=>{
     expect(store.data.projects).toHaveLength(0);expect(await fs.readFile(path.join(temp,'project','keep.txt'),'utf8')).toBe('keep');
   });
   it('shutdown is idempotent and waits for running command cancellation',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);await work.setApprovalMode(projectId,'automatic');
     const j=await command('printf started; sleep 30');await expect.poll(()=>work.jobSnapshot(j.id).output).toContain('started');
     await Promise.all([work.shutdown(),work.shutdown()]);expect(work.job(j.id).state).toBe('cancelled');
@@ -337,6 +361,7 @@ describe('MCP transport and tool surface',()=>{
     await expect(invoke('files_read_batch',{projectId,paths:Array(9).fill('a.txt')})).rejects.toThrow();
   });
   it('answers fast automatic work in one call and never holds a pending approval',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);const invoke=workspaceInvoker(work);
     const started=Date.now();const pending=await invoke('command_propose',{...request(),command:'touch later'}) as Job;
     expect(pending.state).toBe('pending');expect(Date.now()-started).toBeLessThan(1000);
@@ -344,6 +369,7 @@ describe('MCP transport and tool surface',()=>{
     expect(await invoke('command_propose',{...request(),command:'printf ok'})).toMatchObject({state:'done',exitCode:0,output:'ok'});
   });
   it('releases a held tool call with the final state when the user stops the command',async()=>{
+    if(process.platform==='win32')return;
     await work.writable(projectId,true);await work.setApprovalMode(projectId,'automatic');
     const call=workspaceInvoker(work)('command_propose',{...request(),command:'printf started; sleep 30'}) as Promise<Job>;
     await expect.poll(()=>store.data.jobs[0]?.state).toBe('running');

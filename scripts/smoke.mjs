@@ -8,12 +8,15 @@ import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const packaged=!!process.env.WORKROOM_APP;
+const windows=process.platform==='win32';
 const label=packaged?'packaged-smoke':'ui-smoke';
 const artifacts=path.join(root,'artifacts/release-audit');await fs.mkdir(artifacts,{recursive:true});
 const temp=await fs.mkdtemp(path.join(os.tmpdir(),'workroom-ui-'));
 const project=path.join(temp,'project');const dataDir=path.join(temp,'data');await fs.mkdir(project);
 const pkg=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
-const executable=packaged?path.resolve(process.env.WORKROOM_APP):path.join(root,'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+const executable=packaged?path.resolve(process.env.WORKROOM_APP):windows
+  ?path.join(root,'node_modules/electron/dist/electron.exe')
+  :path.join(root,'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
 const env={...process.env,WORKROOM_DATA_DIR:dataDir,WORKROOM_PORT:'0',WORKROOM_ISOLATED_TEST:'1',ELECTRON_ENABLE_SECURITY_WARNINGS:'1'};
 // Finder-launched apps carry no locale; the smoke mirrors that so the command locale fallback is exercised.
 for(const key of ['ELECTRON_RUN_AS_NODE','ELECTRON_RENDERER_URL','WORKROOM_TUNNEL_CLIENT','NODE_OPTIONS','LANG','LC_ALL','LC_CTYPE'])delete env[key];
@@ -72,11 +75,11 @@ try{
   checks.push('real MCP initialization, single-call write, resultHash patch chain, batch read and duplicate retry');
   const task=await tool('task_create',{projectId:p.id,title:'Smoke checkpoint',objective:'Preserve across restart'});
   await tool('task_update',{taskId:task.id,status:'done',summary:'Verified checkpoint'});
-  const command=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'printf approved > command.txt'});
+  const command=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:windows?"[System.IO.File]::WriteAllText('command.txt','approved')":'printf approved > command.txt'});
   assert.equal(command.state,'pending');assert.equal(await exists(path.join(project,'command.txt')),false);
   await page.locator('[data-tab="jobs"]').click();await page.locator(`[data-approve="${command.id}"]`).click();
   assert.equal((await jobDone(command.id)).state,'done');assert.equal(await fs.readFile(path.join(project,'command.txt'),'utf8'),'approved');
-  const reject=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'touch rejected.txt'});
+  const reject=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:windows?"New-Item rejected.txt -ItemType File":'touch rejected.txt'});
   await page.locator(`[data-reject="${reject.id}"]`).click();assert.equal((await jobDone(reject.id)).state,'declined');assert.equal(await exists(path.join(project,'rejected.txt')),false);
   checks.push('manual command approval and rejection via UI');
   await nativeResponse(0);await page.locator('#approval-mode').selectOption('automatic');
@@ -86,13 +89,28 @@ try{
   await nativeResponse(1);await page.locator('#approval-mode').selectOption('automatic');
   await until(async()=>(await snapshot()).projects[0].approvalMode==='automatic','automatic mode enabled after consent');
   const deletion=await tool('file_delete',{projectId:p.id,requestId:randomUUID(),path:'hello.txt',expectedHash:patched.resultHash});assert.equal(deletion.state,'done');assert.equal(await exists(path.join(project,'hello.txt')),false);
-  const locale=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:"printf '한글' | wc -m | tr -d ' '"});assert.equal(locale.output.trim(),'2','commands need a UTF-8 character locale');
-  const runningCall=tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'printf started; sleep 30'});
+  if(windows){
+    const unsupported=await rpc('tools/call',{name:'command_propose',arguments:{projectId:p.id,requestId:randomUUID(),command:'Get-Content command.txt'}});
+    assert.equal(unsupported.isError,true,'Windows automatic command must fail closed');
+    await page.locator('#approval-mode').selectOption('review');
+    await until(async()=>(await snapshot()).projects[0].approvalMode==='review','review mode enabled');
+  }else{
+    const locale=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:"printf '한글' | wc -m | tr -d ' '"});
+    assert.equal(locale.output.trim(),'2','commands need a UTF-8 character locale');
+  }
+  const runningCall=tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:windows?'Write-Output started; Start-Sleep -Seconds 30':'printf started; sleep 30'});
+  if(windows){
+    const pending=await runningCall;
+    assert.equal(pending.state,'pending');
+    await page.locator(`[data-approve="${pending.id}"]`).click();
+  }
   let running;await until(async()=>(running=(await snapshot()).jobs.find(j=>j.state==='running'&&j.output.includes('started'))),'running output');
-  await page.locator(`[data-cancel-job="${running.id}"]`).click();assert.equal((await runningCall).state,'cancelled','UI stop releases the held tool call');
+  await page.locator(`[data-cancel-job="${running.id}"]`).click();
+  if(windows)assert.equal((await jobDone(running.id)).state,'cancelled');
+  else assert.equal((await runningCall).state,'cancelled','UI stop releases the held tool call');
   await page.screenshot({path:path.join(artifacts,label+'.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'Unexpected horizontal UI overflow');
-  checks.push('native opt-in, single-call automatic deletion, UTF-8 command locale, running command stop and UI layout bounds');
+  checks.push(windows?'native opt-in, automatic deletion, rejected automatic command, reviewed PowerShell stop and UI layout bounds':'native opt-in, single-call automatic deletion, UTF-8 command locale, running command stop and UI layout bounds');
   await page.locator('[data-action="clear-history"]').click();await until(async()=>(await snapshot()).jobs.length===0,'completed history cleanup');
   assert.equal((await tool('file_propose',input)).id,write.id);assert.equal(await exists(path.join(project,'hello.txt')),false);
   checks.push('history cleanup keeps replay protection');

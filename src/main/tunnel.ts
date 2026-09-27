@@ -18,8 +18,10 @@ export function validateTunnelInput(id: unknown, key: unknown): { id: string; ke
 export function tunnelEnvironment(key?: string, endpoint?: string): NodeJS.ProcessEnv {
   // Do not inherit profiles, proxy destinations, logging flags or unrelated credentials.
   const env: NodeJS.ProcessEnv = {};
-  for (const name of ['HOME','TMPDIR','LANG','LC_ALL','SystemRoot']) if (process.env[name]) env[name] = process.env[name];
-  env.PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+  for (const name of ['HOME','TMPDIR','LANG','LC_ALL','SystemRoot','USERPROFILE','TEMP','TMP','APPDATA','LOCALAPPDATA']) if (process.env[name]) env[name] = process.env[name];
+  env.PATH = process.platform === 'win32'
+    ? `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32;${process.env.SystemRoot ?? 'C:\\Windows'}`
+    : '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
   if (key) env.WORKROOM_TUNNEL_API_KEY = key;
   if (endpoint) env.MCP_SERVER_URL = endpoint;
   return env;
@@ -45,7 +47,9 @@ export class Tunnel extends EventEmitter {
   }
   async inspect(): Promise<TunnelStatus> {
     if (!this.child && !this.busy) {
-      const candidates = this.candidates ?? ['/opt/homebrew/bin/tunnel-client','/usr/local/bin/tunnel-client'];
+      const candidates = this.candidates ?? (process.platform === 'win32'
+        ? [path.join(this.dataDir,'bin','tunnel-client.exe')]
+        : ['/opt/homebrew/bin/tunnel-client','/usr/local/bin/tunnel-client']);
       let detected: string | undefined;
       for (const candidate of candidates) {
         try {
@@ -54,7 +58,7 @@ export class Tunnel extends EventEmitter {
           await fs.access(real, constants.X_OK);
           const stat = await fs.stat(real);
           const owner = !process.getuid || stat.uid === 0 || stat.uid === process.getuid();
-          if (stat.isFile() && owner && (stat.mode & 0o022) === 0) { detected = real; break; }
+          if (stat.isFile() && owner && (process.platform === 'win32' || (stat.mode & 0o022) === 0)) { detected = real; break; }
         } catch { /* not a usable local executable */ }
       }
       this.binary = detected;

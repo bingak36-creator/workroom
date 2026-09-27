@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.3.0-rc.2';
+export const APP_VERSION = '0.3.0-rc.3';
 export type ApprovalMode = 'automatic' | 'delete' | 'review';
 export interface Project { id: string; name: string; path: string; writable: boolean; approvalMode?: ApprovalMode; approvedFolders?: string[] }
 export interface Task { id: string; projectId: string; title: string; objective: string; status: 'todo' | 'running' | 'blocked' | 'done'; summary: string; createdAt: number; updatedAt: number }

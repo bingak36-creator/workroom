@@ -15,7 +15,7 @@ interface Runtime { process: ChildProcess; output: string; bytes: number; cancel
 const MAX_OUTPUT = 32000;
 export function commandEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { NO_COLOR: '1', TERM: 'dumb' };
-  for (const name of ['HOME','TMPDIR','LANG','LC_ALL','LC_CTYPE','SystemRoot']) if (process.env[name]) env[name] = process.env[name];
+  for (const name of ['HOME','TMPDIR','LANG','LC_ALL','LC_CTYPE','SystemRoot','USERPROFILE','TEMP','TMP','APPDATA','LOCALAPPDATA']) if (process.env[name]) env[name] = process.env[name];
   env.PATH = process.platform === 'win32'
     ? `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32;${process.env.SystemRoot ?? 'C:\\Windows'}`
     : '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
@@ -293,6 +293,13 @@ export class Workspace extends EventEmitter {
   private kill(id: string, reason = '사용자가 실행을 중지했습니다.'): void {
     const runtime = this.processes.get(id); if (!runtime || runtime.cancelled) return;
     runtime.cancelled = true; runtime.reason = reason;
+    if (process.platform === 'win32' && runtime.process.pid) {
+      const taskkill = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe');
+      const killer = spawn(taskkill, ['/PID', String(runtime.process.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      killer.on('error', () => { try { runtime.process.kill(); } catch {} });
+      killer.on('close', code => { if (code !== 0) try { runtime.process.kill(); } catch {} });
+      return;
+    }
     const signal = (value: NodeJS.Signals): void => { try { if (process.platform !== 'win32' && runtime.process.pid) process.kill(-runtime.process.pid, value); else runtime.process.kill(value); } catch {} };
     signal('SIGTERM'); runtime.killTimer = setTimeout(() => signal('SIGKILL'), 1000); runtime.killTimer.unref();
   }

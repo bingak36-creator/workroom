@@ -7,11 +7,13 @@ import { syncDirectory } from './private-io';
 const MAX_FILE = 256 * 1024;
 const BLOCKED_NAMES = new Set(['.git','.ssh','.codex','.aws','.azure','.docker','.gnupg','.kube','node_modules','.npmrc','.pypirc','.netrc','.git-credentials','credentials.json','service-account.json','id_rsa','id_ed25519']);
 const SECRET_EXTENSIONS = ['.pem','.key','.p8','.p12','.pfx','.jks','.keystore'];
+const windowsReserved = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+const unsafeWindowsPart = (name: string): boolean => process.platform === 'win32' && (/[<>:"|?*]/.test(name) || /[. ]$/.test(name) || windowsReserved.test(name));
 export const hash = (text: string): string => createHash('sha256').update(text).digest('hex');
 export function approved(project: Project, relative: string): boolean {
   if (path.isAbsolute(relative) || relative.includes('\\')) return false;
   const parts = relative.split('/').filter(part => part && part !== '.');
-  if (parts.some(part => part === '..' || blocked(part))) return false;
+  if (parts.some(part => part === '..' || blocked(part) || unsafeWindowsPart(part))) return false;
   const value = parts.join('/');
   return (project.approvedFolders ?? []).some(folder => !folder || value === folder || value.startsWith(folder + '/'));
 }
@@ -31,7 +33,7 @@ export function validateContent(content: string): void {
 export async function resolveFile(project: Project, relative: string, allowMissing = false): Promise<string> {
   if (typeof relative !== 'string' || relative.length > 1024 || path.isAbsolute(relative) || relative.includes('\\') || /[\x00-\x1f\x7f]/.test(relative)) throw new Error('프로젝트 기준 상대 경로를 사용하세요.');
   const parts = relative.split('/').filter(part => part !== '' && part !== '.');
-  if (parts.some(part => part === '..' || blocked(part))) throw new Error('허용되지 않는 경로입니다.');
+  if (parts.some(part => part === '..' || blocked(part) || unsafeWindowsPart(part))) throw new Error('허용되지 않는 경로입니다.');
   const root = await fs.realpath(project.path);
   if (root !== project.path || !(await fs.lstat(root)).isDirectory()) throw new Error('프로젝트 경로가 변경되었습니다. 폴더를 다시 등록하세요.');
   let target = root;
@@ -56,7 +58,7 @@ export async function listFiles(project: Project, relative: string): Promise<Fil
   let scanned = 0;
   for await (const entry of directory) {
     if (++scanned > 10000) break;
-    if (entry.isSymbolicLink() || blocked(entry.name) || (!entry.isDirectory() && !entry.isFile())) continue;
+    if (entry.isSymbolicLink() || blocked(entry.name) || unsafeWindowsPart(entry.name) || (!entry.isDirectory() && !entry.isFile())) continue;
     entries.push({ name: entry.name, directory: entry.isDirectory() });
     if (entries.length >= 500) break;
   }
