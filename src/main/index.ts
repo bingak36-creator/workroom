@@ -74,14 +74,26 @@ else {
     handle('snapshot', () => ({ ...service.snapshot(), version: app.getVersion(), runtime: { packaged: app.isPackaged, platform: process.platform, arch: process.arch } }));
     handle('project:add', async () => { const result = await dialog.showOpenDialog(window!, { properties: ['openDirectory'] }); return result.canceled ? null : service.addProject(result.filePaths[0]!); });
     handle('project:writable', (p, v) => service.writable(id.parse(p), z.boolean().parse(v)));
+    const startAutomatic = async (projectId: string): Promise<void> => {
+      const project = service.project(projectId); const folders = [...(project.approvedFolders ?? [])];
+      const scope = folders.length ? folders.map(folder => folder || '/ (프로젝트 전체)').join(', ') : '/ (프로젝트 전체)';
+      const result = await dialog.showMessageBox(window!, {
+        type: 'warning', message: `${project.name} 자동승인을 시작할까요?`,
+        detail: `접근 범위: ${scope}\n프로젝트: ${project.path}\n\n폴더 접근과 변경 허용을 함께 설정합니다. 승인 범위의 파일 수정·삭제를 자동 실행합니다. ${process.platform === 'darwin' ? '셸 명령은 폴더 격리 안에서 자동 실행하며 네트워크는 차단합니다.' : '이 OS에서는 모든 셸 명령을 거부합니다.'}\n비밀파일 차단과 환경변수 허용 목록은 유지됩니다.`,
+        buttons: ['취소', '자동승인 시작'], defaultId: 0, cancelId: 0, noLink: true,
+        checkboxLabel: '앱을 다시 열 때도 이 프로젝트의 자동승인 유지', checkboxChecked: project.rememberAutomatic ?? false
+      });
+      if (result.response === 1) await service.enableAutomatic(projectId, result.checkboxChecked, folders);
+    };
+    handle('project:automatic-start', p => startAutomatic(id.parse(p)));
+    handle('project:automatic-stop', p => service.disableAutomatic(id.parse(p)));
     handle('project:approval-mode', async (p, value) => {
       const projectId = id.parse(p); const mode = z.enum(['review','delete','automatic']).parse(value);
-      if (mode === 'automatic' && !await confirm('파일 변경과 삭제를 자동 승인할까요?', process.platform === 'darwin'
-        ? '승인된 폴더의 파일 변경·삭제와 폴더 격리된 셸 명령을 자동 실행합니다. 앱을 재시작하면 해제됩니다.'
-        : '승인된 폴더의 파일 변경·삭제를 자동 실행합니다. Windows에서는 자동 셸 명령을 지원하지 않습니다. 앱을 재시작하면 해제됩니다.', '자동 승인 허용')) return;
+      if (mode === 'automatic') { await startAutomatic(projectId); return; }
       await service.setApprovalMode(projectId, mode);
     });
     handle('project:folder-approve', (p,r) => service.approveFolder(id.parse(p), relative.parse(r)));
+    handle('project:environment', (p,names) => service.setEnvironmentNames(id.parse(p), names));
     handle('project:folder-revoke', (p,r) => service.revokeFolder(id.parse(p), relative.parse(r)));
     handle('project:remove', async p => {
       const projectId = id.parse(p); const project = service.project(projectId);

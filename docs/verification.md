@@ -72,9 +72,31 @@ Electron 검사는 실제 창에서 프로젝트 추가, 권한 설정, 파일 �
 
 실제 ChatGPT 계정·터널로 새 도구를 호출하는 확인은 하지 않았습니다.
 
+## 2026-09-28 비밀 경로·환경변수 변경 검증
+
+macOS Apple Silicon · Node.js v26.4.0 · 소스 0.3.0-rc.3의 미배포 변경 기준입니다. 실제 사용자 비밀파일이나 환경변수 값 대신 임시 프로젝트와 가짜 값만 사용했습니다.
+
+| 검사 | 결과 |
+|---|---|
+| `npm run verify` | 타입검사·빌드 통과, Vitest 71개 통과 — workspace 50, tunnel 8, security-boundary 13 |
+| 비밀 경로 | 자동·수동 명령에서 읽기·복사·이름 변경·삭제·실행·새 파일 작성 차단. 대소문자 변형, 비밀 경로를 프로젝트 루트로 등록하는 시도, 심볼릭 링크·하드링크 우회 검사 |
+| 환경변수 | UI 허용 이름 중 요청한 변수만 전달. 없는 값·미허용 이름·예약 이름·값 객체 거부. stdout/stderr 및 청크에 걸친 원문 값 가리기, 상태 파일에 원문 값 없음 |
+| 실제 요청 | 수동 승인 명령이 선택한 가짜 OS 변수로 로컬 HTTP 서버에 인증 요청 성공. 자동 명령의 네트워크 요청은 거부 |
+| 권한 취소 | 최종 파일 검사 중 권한 취소 시 명령 시작과 파일 삭제 방지. 부모가 먼저 종료돼도 같은 그룹의 SIGTERM 무시 자식 종료 |
+| `npm run smoke` | 실제 Electron UI에서 이름 허용 목록 저장, HTTP/STDIO MCP, 수동 승인 후 .env 읽기 거부, 선택 변수만 전달, 출력 원문 값 가리기, 재시작 후 이름 목록 복원 통과 |
+| `npm run check:release` | 버전·lock·릴리스 문서 검사 통과 |
+
+증거는 `artifacts/release-audit/verify.json`, `tests.json`, `ui-smoke.json`, `environment-settings.png`입니다. 새 패키지·설치본은 만들거나 교체하지 않았습니다. Windows 네이티브 실행, 외부 HTTPS 서비스, 실제 ChatGPT 터널은 이번 변경의 검증 범위가 아닙니다.
+
+## 2026-10-02 rc.4 자동승인 편의·보안 통합 검증
+
+macOS Apple Silicon의 rc.4 소스에서 타입검사·빌드와 Vitest 81개를 통과했습니다. 자동승인 빠른 시작·중지, 기존 폴더 범위 유지, 확인 중 변경된 범위 거부, 명시적 재시작 유지, 미완료 요청 취소와 권한 회수까지 10개 회귀 테스트를 추가했습니다. 실제 Electron UI에서도 취소·동의, 두 프로젝트의 서로 다른 재시작 정책, 재시작 후 끄기와 최소 창 너비를 확인했습니다. 환경변수 제한과 비밀파일 차단 검사는 계속 포함됩니다. 배포 직전 `npm audit` 결과는 0건입니다.
+
+소스 검증은 `artifacts/release-audit/{verify,tests,ui-smoke,npm-audit-rc4}.json`, UI 캡처는 `automatic-settings.png`에 있습니다. 패키징 파이프라인은 macOS·Windows별 소스/패키지 UI 검사를 실행하며, 각 배포 파일의 SHA-256과 manifest를 생성합니다. 실제 패키지 검증 완료 여부는 해당 실행의 JSON 보고서와 GitHub Actions 결과에서 확인합니다.
+
 ## 아직 완료하지 않은 범위
 
-Developer ID 서명, Apple 공증, Gatekeeper를 통과하는 정식 설치본, 공개 게시, 실제 배포자의 지원·개인정보·보안 신고 채널 확정은 별도입니다. 정식 빌드의 별도 깨끗한 Mac 설치·업그레이드 테스트와 독립 보안 검토도 수행하지 않았습니다. Windows/Linux/Intel Mac은 미검증입니다.
+Developer ID 서명, Apple 공증, Gatekeeper를 통과하는 정식 설치본, 실제 배포자의 지원·개인정보·보안 신고 채널 확정은 별도입니다. 정식 빌드의 별도 깨끗한 Mac 설치·업그레이드 테스트와 독립 보안 검토도 수행하지 않았습니다. Windows x64는 GitHub Actions의 네이티브 검사 결과를 사용하며 Linux/Intel Mac/Windows ARM은 배포 검증 대상이 아닙니다.
 
 터널 테스트는 로컬 모의 제어 서버 또는 모의 클라이언트를 사용했습니다. 사용자의 OpenAI 런타임 키를 대신 읽거나 실제 계정 인증을 수행하지 않았습니다. 일반 ChatGPT에서 새 버전 도구를 등록·호출하는 최종 계정 연결은 별도 확인해야 합니다.
 

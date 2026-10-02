@@ -9,20 +9,13 @@ import { Store } from './store';
 import * as files from './files';
 import { APP_VERSION, type ApprovalMode, type Job, type Project, type Snapshot, type Task, type Receipt } from '../shared';
 import { applyEdits, fingerprint, terminal, type Proposal } from './request';
-import { commandSandbox } from './command-sandbox';
+import { commandSandbox, inspectCommandTree } from './command-sandbox';
+import { commandEnvironment, outputRedactor, selectedEnvironment, validateEnvironmentNames } from './command-environment';
+import { requireSafeRoot } from './secret-policy';
+export { commandEnvironment } from './command-environment';
 
 interface Runtime { process: ChildProcess; output: string; bytes: number; cancelled: boolean; reason: string; killTimer?: NodeJS.Timeout }
 const MAX_OUTPUT = 32000;
-export function commandEnvironment(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { NO_COLOR: '1', TERM: 'dumb' };
-  for (const name of ['HOME','TMPDIR','LANG','LC_ALL','LC_CTYPE','SystemRoot','USERPROFILE','TEMP','TMP','APPDATA','LOCALAPPDATA']) if (process.env[name]) env[name] = process.env[name];
-  env.PATH = process.platform === 'win32'
-    ? `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32;${process.env.SystemRoot ?? 'C:\\Windows'}`
-    : '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
-  // Finder-launched apps inherit no locale; the C locale makes wc/cut/tr/awk treat Korean text as raw bytes.
-  if (process.platform === 'darwin' && !env.LANG && !env.LC_ALL && !env.LC_CTYPE) env.LC_CTYPE = 'en_US.UTF-8';
-  return env;
-}
 const overlaps = (a: string, b: string): boolean => a === b || a.startsWith(b + path.sep) || b.startsWith(a + path.sep);
 
 export class Workspace extends EventEmitter {
@@ -85,7 +78,9 @@ export class Workspace extends EventEmitter {
     return !this.paused && !this.closing && !this.revoked.has(job.projectId) && !this.cancellations.has(job.id) && !!this.store.data.projects.find(p => p.id === job.projectId && p.writable);
   }
   async addProject(folder: string): Promise<Project> {
+    requireSafeRoot(folder);
     const canonical = await fs.realpath(folder);
+    requireSafeRoot(canonical);
     if (!(await fs.stat(canonical)).isDirectory()) throw new Error('폴더를 선택하세요.');
     const privateRoot = await fs.realpath(this.dataDir).catch(() => path.resolve(this.dataDir));
     if (canonical === path.parse(canonical).root || canonical === await fs.realpath(os.homedir()) || overlaps(canonical, privateRoot) || this.protectedPaths.some(p => overlaps(canonical, path.resolve(p)))) throw new Error('홈·시스템 루트·앱 데이터 폴더 대신 작업용 하위 폴더를 선택하세요.');
@@ -97,7 +92,7 @@ export class Workspace extends EventEmitter {
   async writable(id: string, value: boolean): Promise<void> {
     this.project(id);
     if (!value) { this.revoked.add(id); await this.cancelProject(id); }
-    await this.store.update(d => { d.projects.find(p => p.id === id)!.writable = value; });
+    await this.store.update(d => { const p = d.projects.find(p => p.id === id)!; p.writable = value; if (!value) p.rememberAutomatic = false; });
     if (value) this.revoked.delete(id);
     this.changed(); this.pump();
   }
@@ -105,8 +100,44 @@ export class Workspace extends EventEmitter {
     this.project(id);
     if (!['review','delete','automatic'].includes(mode)) throw new Error('지원하지 않는 승인 모드입니다.');
     this.revoked.add(id);
-    try { await this.cancelProject(id); await this.store.update(d => { d.projects.find(p => p.id === id)!.approvalMode = mode; }); }
+    try { await this.cancelProject(id); await this.store.update(d => { const p = d.projects.find(p => p.id === id)!; p.approvalMode = mode; p.rememberAutomatic = false; }); }
     finally { this.revoked.delete(id); this.changed(); }
+  }
+  async enableAutomatic(id: string, remember: boolean, expectedFolders: string[]): Promise<void> {
+    const project = this.project(id);
+    const folders = [...(project.approvedFolders ?? [])];
+    if (JSON.stringify(folders) !== JSON.stringify(expectedFolders)) throw new Error('승인 폴더가 변경되었습니다. 자동승인을 다시 시작하세요.');
+    const granted = folders.length ? folders : [''];
+    for (const folder of granted) {
+      const target = await files.resolveFile(project, folder);
+      if (!(await fs.lstat(target)).isDirectory()) throw new Error('승인 폴더를 다시 확인하세요.');
+    }
+    if (this.paused || this.closing) throw new Error('연결을 재개한 뒤 자동승인을 시작하세요.');
+    this.revoked.add(id);
+    try {
+      await this.cancelProject(id);
+      await this.store.update(d => {
+        const p = d.projects.find(p => p.id === id);
+        if (!p || JSON.stringify(p.approvedFolders ?? []) !== JSON.stringify(expectedFolders)) throw new Error('승인 폴더가 변경되었습니다. 자동승인을 다시 시작하세요.');
+        if (this.paused || this.closing) throw new Error('자동승인 설정이 취소되었습니다.');
+        p.approvedFolders = granted; p.writable = true; p.approvalMode = 'automatic'; p.rememberAutomatic = remember;
+      });
+    } finally { this.revoked.delete(id); this.changed(); }
+  }
+  async disableAutomatic(id: string): Promise<void> {
+    this.project(id); this.revoked.add(id);
+    try {
+      await this.cancelProject(id);
+      await this.store.update(d => { const p = d.projects.find(p => p.id === id)!; p.writable = false; p.approvalMode = 'review'; p.rememberAutomatic = false; });
+    } finally { this.revoked.delete(id); this.changed(); }
+  }
+  async setEnvironmentNames(id: string, raw: unknown): Promise<void> {
+    this.project(id); const names = validateEnvironmentNames(raw);
+    this.revoked.add(id);
+    try {
+      await this.cancelProject(id);
+      await this.store.update(d => { d.projects.find(p => p.id === id)!.environmentNames = names; });
+    } finally { this.revoked.delete(id); this.changed(); }
   }
   async approveFolder(id: string, relative: string): Promise<void> {
     const project = this.project(id);
@@ -118,7 +149,7 @@ export class Workspace extends EventEmitter {
   }
   async revokeFolder(id: string, relative: string): Promise<void> {
     this.project(id); this.revoked.add(id);
-    try { await this.cancelProject(id); await this.store.update(d => { const p = d.projects.find(p => p.id === id)!; p.approvedFolders = (p.approvedFolders ?? []).filter(folder => folder !== relative); }); }
+    try { await this.cancelProject(id); await this.store.update(d => { const p = d.projects.find(p => p.id === id)!; p.approvedFolders = (p.approvedFolders ?? []).filter(folder => folder !== relative); p.rememberAutomatic = false; }); }
     finally { this.revoked.delete(id); this.changed(); }
   }
   async clearHistory(projectId: string): Promise<void> {
@@ -142,7 +173,7 @@ export class Workspace extends EventEmitter {
   }
   propose(input: Proposal): Promise<Job> {
     if (this.incoming >= 32) return Promise.reject(new Error('요청이 많습니다. 실행 결과를 확인한 뒤 다시 시도하세요.'));
-    const copy = { ...input }; this.incoming++;
+    const copy = { ...input, ...(input.environment ? { environment: [...input.environment] } : {}) }; this.incoming++;
     const work = this.proposalQueue.then(() => this.accept(copy));
     this.proposalQueue = work.then(() => {}, () => {});
     return work.finally(() => { this.incoming--; });
@@ -184,7 +215,10 @@ export class Workspace extends EventEmitter {
     if (edits) { request.content = applyEdits(before!, edits); files.validateContent(request.content); }
     this.requireWritable(request.projectId);
     const mode = this.project(request.projectId).approvalMode ?? 'review';
-    if (mode === 'automatic' && request.kind === 'command') commandSandbox(this.project(request.projectId));
+    if (request.kind === 'command') {
+      commandSandbox(this.project(request.projectId));
+      selectedEnvironment(this.project(request.projectId).environmentNames ?? [], request.environment ?? []);
+    }
     const automatic = mode === 'automatic' || (mode === 'delete' && request.kind === 'write');
     const now = Date.now();
     const job: Job = { ...request, id: randomUUID(), requestHash, approval: automatic ? 'automatic' : 'manual', label: request.kind === 'command' ? request.command! : request.path!, state: automatic ? 'queued' : 'pending', before, output: '', createdAt: now, updatedAt: now };
@@ -265,30 +299,38 @@ export class Workspace extends EventEmitter {
     const project = this.project(job.projectId);
     await files.resolveFile(project, '.');
     if (!this.allowed(job)) throw new Error('실행 전에 변경 권한이 취소되었습니다.');
-    const windows = process.platform === 'win32';
-    const sandbox = job.approval === 'automatic' ? commandSandbox(project) : null;
-    if (sandbox) for (const folder of project.approvedFolders ?? []) {
+    commandSandbox(project); // Fail closed on platforms without the mandatory sandbox.
+    for (const folder of project.approvedFolders ?? []) {
       const target = await files.resolveFile(project, folder);
       if (!(await fs.lstat(target)).isDirectory()) throw new Error('승인 폴더가 변경되었습니다. 다시 승인하세요.');
     }
-    const executable = sandbox ? '/usr/bin/sandbox-exec' : windows ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : '/bin/sh';
-    const args = sandbox ? ['-p', sandbox, '/bin/sh', '-c', job.command!] : windows ? ['-NoProfile','-NonInteractive','-Command',job.command!] : ['-c',job.command!];
-    // This is intentionally arbitrary command execution, NEVER an OS/filesystem sandbox.
-    const child = spawn(executable, args, { cwd: project.path, env: commandEnvironment(), detached: !windows, windowsHide: true, shell: false, stdio: ['ignore','pipe','pipe'] });
+    const targets = await inspectCommandTree(project, () => this.allowed(job));
+    const sandbox = commandSandbox(project, job.approval === 'manual', [...targets, this.dataDir, ...this.protectedPaths]);
+    if (!this.allowed(job)) throw new Error('실행 전에 변경 권한이 취소되었습니다.');
+    const selected = selectedEnvironment(this.project(job.projectId).environmentNames ?? [], job.environment ?? []);
+    const redact = outputRedactor(Object.values(selected));
+    const child = spawn('/usr/bin/sandbox-exec', ['-p', sandbox, '/bin/sh', '-c', job.command!], { cwd: project.path, env: commandEnvironment(selected), detached: true, shell: false, stdio: ['ignore','pipe','pipe'] });
     const runtime: Runtime = { process: child, output: '', bytes: 0, cancelled: false, reason: '' };
     this.processes.set(job.id, runtime);
     const collect = (text: string): void => { runtime.output = (runtime.output + text).slice(-MAX_OUTPUT); this.outputChanged(); };
     const decoders = [new StringDecoder('utf8'), new StringDecoder('utf8')];
     [child.stdout, child.stderr].forEach((stream, i) => stream?.on('data', (buffer: Buffer) => {
-      runtime.bytes += buffer.length; collect(decoders[i]!.write(buffer));
+      runtime.bytes += buffer.length; collect(redact(decoders[i]!.write(buffer)));
       if (runtime.bytes > 2 * 1024 * 1024 && !runtime.cancelled) this.kill(job.id, '총 출력 2MB 한도로 실행을 중지했습니다.');
     }));
     const timer = setTimeout(() => this.kill(job.id, '120초 실행 한도에 도달했습니다.'), 120000);
     try {
       const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
-      for (const decoder of decoders) collect(decoder.end());
+      for (const decoder of decoders) collect(redact(decoder.end()));
+      collect(redact('', true));
       return { state: runtime.cancelled ? 'cancelled' : code === 0 ? 'done' : 'failed', output: (runtime.output + (runtime.reason ? '\n[' + runtime.reason + ']' : '')).slice(-MAX_OUTPUT) || '(출력 없음)', code };
-    } finally { clearTimeout(timer); if (runtime.killTimer) clearTimeout(runtime.killTimer); this.processes.delete(job.id); }
+    } finally {
+      clearTimeout(timer);
+      // Parent exit is not proof that descendants exited. Do not leave a live process group behind.
+      if (child.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }
+      if (runtime.killTimer) clearTimeout(runtime.killTimer);
+      this.processes.delete(job.id);
+    }
   }
   private kill(id: string, reason = '사용자가 실행을 중지했습니다.'): void {
     const runtime = this.processes.get(id); if (!runtime || runtime.cancelled) return;

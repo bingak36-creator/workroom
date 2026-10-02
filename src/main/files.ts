@@ -3,10 +3,9 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Project, FileRead, FileEntry } from '../shared';
 import { syncDirectory } from './private-io';
+import { protectedName, requireSafeRoot } from './secret-policy';
 
 const MAX_FILE = 256 * 1024;
-const BLOCKED_NAMES = new Set(['.git','.ssh','.codex','.aws','.azure','.docker','.gnupg','.kube','node_modules','.npmrc','.pypirc','.netrc','.git-credentials','credentials.json','service-account.json','id_rsa','id_ed25519']);
-const SECRET_EXTENSIONS = ['.pem','.key','.p8','.p12','.pfx','.jks','.keystore'];
 const windowsReserved = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 const unsafeWindowsPart = (name: string): boolean => process.platform === 'win32' && (/[<>:"|?*]/.test(name) || /[. ]$/.test(name) || windowsReserved.test(name));
 export const hash = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -20,10 +19,7 @@ export function approved(project: Project, relative: string): boolean {
 export function requireApproved(project: Project, relative: string): void {
   if (!approved(project, relative)) throw new Error('이 폴더는 접근 승인이 필요합니다. Workroom에서 폴더 권한을 지정하세요.');
 }
-const blocked = (name: string): boolean => {
-  const lower = name.toLowerCase();
-  return BLOCKED_NAMES.has(lower) || lower.startsWith('.env') || lower.startsWith('.workroom-') || SECRET_EXTENSIONS.some(ext => lower.endsWith(ext));
-};
+const blocked = (name: string): boolean => protectedName(name) || name.toLowerCase() === 'node_modules';
 export function validateContent(content: string): void {
   if (typeof content !== 'string' || Buffer.byteLength(content) > MAX_FILE) throw new Error('파일은 256KB 이하의 UTF-8 텍스트여야 합니다.');
   if (content.includes('\0') || new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.from(content)) !== content) throw new Error('NUL 또는 잘못된 Unicode 문자는 저장할 수 없습니다.');
@@ -35,6 +31,7 @@ export async function resolveFile(project: Project, relative: string, allowMissi
   const parts = relative.split('/').filter(part => part !== '' && part !== '.');
   if (parts.some(part => part === '..' || blocked(part) || unsafeWindowsPart(part))) throw new Error('허용되지 않는 경로입니다.');
   const root = await fs.realpath(project.path);
+  requireSafeRoot(root);
   if (root !== project.path || !(await fs.lstat(root)).isDirectory()) throw new Error('프로젝트 경로가 변경되었습니다. 폴더를 다시 등록하세요.');
   let target = root;
   for (let i = 0; i < parts.length; i++) {
@@ -110,6 +107,7 @@ export async function deleteFile(project: Project, relative: string, expectedHas
   await resolveFile(project, relative);
   if (!authorized()) throw new Error('삭제 전에 변경 권한이 취소되었습니다.');
   await checkRevision(project, relative, expectedHash);
+  if (!authorized()) throw new Error('삭제 전에 변경 권한이 취소되었습니다.');
   await fs.unlink(path.join(project.path, relative));
   await syncDirectory(path.dirname(path.join(project.path, relative)));
 }

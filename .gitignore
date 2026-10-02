@@ -4,7 +4,7 @@ release/
 release-candidate/
 release-public/
 release-rc2/
-release-rc3*/
+release-rc*/
 release-rebuild*/
 release-win*/
 artifacts/

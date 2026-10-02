@@ -17,7 +17,7 @@ const pkg=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
 const executable=packaged?path.resolve(process.env.WORKROOM_APP):windows
   ?path.join(root,'node_modules/electron/dist/electron.exe')
   :path.join(root,'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
-const env={...process.env,WORKROOM_DATA_DIR:dataDir,WORKROOM_PORT:'0',WORKROOM_ISOLATED_TEST:'1',ELECTRON_ENABLE_SECURITY_WARNINGS:'1'};
+const env={...process.env,SMOKE_SELECTED:'smoke-environment-fixture-9381',SMOKE_UNUSED:'not-forwarded-fixture',WORKROOM_DATA_DIR:dataDir,WORKROOM_PORT:'0',WORKROOM_ISOLATED_TEST:'1',ELECTRON_ENABLE_SECURITY_WARNINGS:'1'};
 // Finder-launched apps carry no locale; the smoke mirrors that so the command locale fallback is exercised.
 for(const key of ['ELECTRON_RUN_AS_NODE','ELECTRON_RENDERER_URL','WORKROOM_TUNNEL_CLIENT','NODE_OPTIONS','LANG','LC_ALL','LC_CTYPE'])delete env[key];
 let app;let page;let bridge;let endpoint;let rpcId=0;const checks=[];const errors=[];const start=Date.now();
@@ -39,7 +39,7 @@ async function tool(name,args){const result=await rpc('tools/call',{name,argumen
 async function jobDone(id){let value;await until(async()=>{value=await tool('job_get',{jobId:id});return !['pending','queued','running'].includes(value.state);},'job completion');return value;}
 async function exists(file){return fs.stat(file).then(()=>true,()=>false);}
 async function snapshot(){return page.evaluate(()=>window.workroom.snapshot());}
-async function nativeResponse(response){await app.evaluate(({dialog},value)=>{globalThis.__workroomConfirmations=0;dialog.showMessageBox=async()=>{globalThis.__workroomConfirmations++;return {response:value,checkboxChecked:false};};},response);}
+async function nativeResponse(response,checkboxChecked=false){await app.evaluate(({dialog},value)=>{globalThis.__workroomConfirmations=0;dialog.showMessageBox=async()=>{globalThis.__workroomConfirmations++;return value;};},{response,checkboxChecked});}
 try{
   await launch();
   assert.equal(page.url(),'workroom://app/index.html');
@@ -54,6 +54,16 @@ try{
   await page.locator('[data-action="add-project"]').first().click();
   await until(async()=>(await snapshot()).projects.length===1,'project added');
   const p=(await snapshot()).projects[0];assert.equal(p.writable,false);assert.equal(p.approvalMode,'review');
+  await nativeResponse(0);await page.locator('[data-action="start-automatic"]').click();
+  await until(()=>app.evaluate(()=>globalThis.__workroomConfirmations>0),'quick start consent cancelled');
+  assert.equal((await snapshot()).projects[0].writable,false);assert.deepEqual((await snapshot()).projects[0].approvedFolders,[]);
+  await nativeResponse(1);await page.locator('[data-action="start-automatic"]').click();
+  await until(async()=>(await snapshot()).projects[0].writable,'quick start enables all required permissions');
+  assert.deepEqual((await snapshot()).projects[0].approvedFolders,['']);
+  assert.equal((await snapshot()).projects[0].approvalMode,'automatic');
+  await page.locator('[data-action="stop-automatic"]').click();
+  await until(async()=>!(await snapshot()).projects[0].writable,'quick stop revokes authority');
+  checks.push('one-action automatic start requires consent and stop restores read-only review');
   const initialize=await rpc('initialize',{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'workroom-release-smoke',version:'1'}});
   assert.equal(initialize.serverInfo.version,pkg.version);
   const tools=(await rpc('tools/list',{})).tools;assert.ok(!tools.some(t=>t.name==='token_estimate'));assert.ok(['files_read_batch','file_patch'].every(name=>tools.some(t=>t.name===name)));
@@ -63,6 +73,14 @@ try{
     console.error('Folder approval diagnostic:',JSON.stringify({project:(await snapshot()).projects[0],input:await page.locator('#approved-folder-path').inputValue(),toast:await page.locator('#toast').textContent()}));
     throw error;
   });
+  await page.locator('#environment-names').fill('SMOKE_SELECTED');
+  await page.locator('#environment-form button').click();
+  await until(async()=>(await snapshot()).projects[0].environmentNames.includes('SMOKE_SELECTED'),'environment names allowed through UI');
+  assert.ok(!JSON.stringify(await snapshot()).includes(env.SMOKE_SELECTED));
+  await page.locator('#environment-form').scrollIntoViewIfNeeded();
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'Environment form must fit the UI');
+  await page.screenshot({path:path.join(artifacts,'environment-settings.png'),fullPage:true});
+  checks.push('environment name allowlist saved through UI without exposing values');
   await page.locator('#writable').check();await until(async()=>(await snapshot()).projects[0].writable,'write enabled');
   await page.locator('#approval-mode').selectOption('delete');await until(async()=>(await snapshot()).projects[0].approvalMode==='delete','delete mode enabled');
   const input={projectId:p.id,requestId:randomUUID(),path:'hello.txt',content:'Workroom smoke 한글 👋\n',expectedHash:null};
@@ -75,13 +93,24 @@ try{
   checks.push('real MCP initialization, single-call write, resultHash patch chain, batch read and duplicate retry');
   const task=await tool('task_create',{projectId:p.id,title:'Smoke checkpoint',objective:'Preserve across restart'});
   await tool('task_update',{taskId:task.id,status:'done',summary:'Verified checkpoint'});
-  const command=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:windows?"[System.IO.File]::WriteAllText('command.txt','approved')":'printf approved > command.txt'});
-  assert.equal(command.state,'pending');assert.equal(await exists(path.join(project,'command.txt')),false);
-  await page.locator('[data-tab="jobs"]').click();await page.locator(`[data-approve="${command.id}"]`).click();
-  assert.equal((await jobDone(command.id)).state,'done');assert.equal(await fs.readFile(path.join(project,'command.txt'),'utf8'),'approved');
-  const reject=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:windows?"New-Item rejected.txt -ItemType File":'touch rejected.txt'});
-  await page.locator(`[data-reject="${reject.id}"]`).click();assert.equal((await jobDone(reject.id)).state,'declined');assert.equal(await exists(path.join(project,'rejected.txt')),false);
-  checks.push('manual command approval and rejection via UI');
+  await page.locator('[data-tab="jobs"]').click();
+  if(windows){
+    const refused=await rpc('tools/call',{name:'command_propose',arguments:{projectId:p.id,requestId:randomUUID(),command:'Write-Output blocked'}});
+    assert.equal(refused.isError,true,'Windows must refuse even reviewed commands');
+    checks.push('Windows reviewed commands fail closed');
+  }else{
+    const command=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'test -n "$SMOKE_SELECTED" && test -z "$SMOKE_UNUSED" && printf approved > command.txt',environment:['SMOKE_SELECTED']});
+    assert.equal(command.state,'pending');assert.equal(await exists(path.join(project,'command.txt')),false);
+    await page.locator(`[data-approve="${command.id}"]`).click();
+    assert.equal((await jobDone(command.id)).state,'done');assert.equal(await fs.readFile(path.join(project,'command.txt'),'utf8'),'approved');
+    const reject=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'touch rejected.txt'});
+    await page.locator(`[data-reject="${reject.id}"]`).click();assert.equal((await jobDone(reject.id)).state,'declined');assert.equal(await exists(path.join(project,'rejected.txt')),false);
+    await fs.writeFile(path.join(project,'.env'),'fixture-secret-never-return');
+    const blocked=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'cat .env'});
+    await page.locator(`[data-approve="${blocked.id}"]`).click();
+    const failed=await jobDone(blocked.id);assert.equal(failed.state,'failed');assert.ok(!failed.output.includes('fixture-secret-never-return'));
+    checks.push('reviewed command sandbox, selected environment only, secret denial and rejection via UI');
+  }
   await nativeResponse(0);await page.locator('#approval-mode').selectOption('automatic');
   await until(()=>app.evaluate(()=>globalThis.__workroomConfirmations>0),'native risk confirmation');
   await until(async()=>await page.locator('#approval-mode').inputValue()==='delete','cancelled risk dialog restores policy');
@@ -98,19 +127,19 @@ try{
     const locale=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:"printf '한글' | wc -m | tr -d ' '"});
     assert.equal(locale.output.trim(),'2','commands need a UTF-8 character locale');
   }
-  const runningCall=tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:windows?'Write-Output started; Start-Sleep -Seconds 30':'printf started; sleep 30'});
-  if(windows){
-    const pending=await runningCall;
-    assert.equal(pending.state,'pending');
-    await page.locator(`[data-approve="${pending.id}"]`).click();
+  if(!windows){
+    const masked=await tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'printf "%s" "$SMOKE_SELECTED"',environment:['SMOKE_SELECTED']});
+    assert.equal(masked.output,'[환경변수 값 숨김]');
+    assert.ok(!(await fs.readFile(path.join(dataDir,'workspace.json'),'utf8')).includes(env.SMOKE_SELECTED));
+    const runningCall=tool('command_propose',{projectId:p.id,requestId:randomUUID(),command:'printf started; sleep 30'});
+    let running;await until(async()=>(running=(await snapshot()).jobs.find(j=>j.state==='running'&&j.output.includes('started'))),'running output');
+    await page.locator(`[data-cancel-job="${running.id}"]`).click();
+    assert.equal((await runningCall).state,'cancelled','UI stop releases the held tool call');
+    checks.push('raw environment values masked before UI and persistence');
   }
-  let running;await until(async()=>(running=(await snapshot()).jobs.find(j=>j.state==='running'&&(windows||j.output.includes('started')))),windows?'running command':'running output');
-  await page.locator(`[data-cancel-job="${running.id}"]`).click();
-  if(windows)assert.equal((await jobDone(running.id)).state,'cancelled');
-  else assert.equal((await runningCall).state,'cancelled','UI stop releases the held tool call');
   await page.screenshot({path:path.join(artifacts,label+'.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'Unexpected horizontal UI overflow');
-  checks.push(windows?'native opt-in, automatic deletion, rejected automatic command, reviewed PowerShell stop and UI layout bounds':'native opt-in, single-call automatic deletion, UTF-8 command locale, running command stop and UI layout bounds');
+  checks.push(windows?'native opt-in, automatic deletion, all commands refused and UI layout bounds':'native opt-in, single-call automatic deletion, UTF-8 command locale, running command stop and UI layout bounds');
   await page.locator('[data-action="clear-history"]').click();await until(async()=>(await snapshot()).jobs.length===0,'completed history cleanup');
   assert.equal((await tool('file_propose',input)).id,write.id);assert.equal(await exists(path.join(project,'hello.txt')),false);
   checks.push('history cleanup keeps replay protection');
@@ -124,9 +153,24 @@ try{
   bridge.stdin.write(JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/list',params:{}})+'\n');
   await until(()=>responses.has(2),'stdio tools');assert.equal(responses.get(2).result.tools.length,tools.length);bridge.kill();bridge=null;
   checks.push('packaged-compatible STDIO bridge');
+  const rememberedProject=path.join(temp,'remembered-project');await fs.mkdir(rememberedProject);
+  await app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});},rememberedProject);
+  await page.locator('[data-action="add-project"]').first().click();
+  await until(async()=>(await snapshot()).projects.length===2,'second project added');
+  const rememberedId=(await snapshot()).projects[1].id;
+  await nativeResponse(1,true);await page.locator('[data-action="start-automatic"]').click();
+  await until(async()=>(await snapshot()).projects[1].rememberAutomatic,'persistent opt-in selected');
+  await page.screenshot({path:path.join(artifacts,'automatic-settings.png'),fullPage:true});
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1000,680));
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'Quick approval must fit minimum window width');
   const oldEndpoint=endpoint;await app.close();app=null;assert.equal(await exists(path.join(dataDir,'connection.json')),false);
-  await launch();snap=await snapshot();assert.equal(snap.projects[0].writable,false);assert.equal(snap.projects[0].approvalMode,'review');assert.equal(snap.tasks[0].summary,'Verified checkpoint');assert.notEqual(endpoint,oldEndpoint);
-  checks.push('restart resets authority, rotates secret and restores checkpoints');
+  await launch();snap=await snapshot();assert.equal(snap.projects[0].writable,false);assert.equal(snap.projects[0].approvalMode,'review');assert.deepEqual(snap.projects[0].environmentNames,['SMOKE_SELECTED']);assert.equal(snap.tasks[0].summary,'Verified checkpoint');assert.notEqual(endpoint,oldEndpoint);
+  assert.equal(snap.projects[1].writable,true);assert.equal(snap.projects[1].rememberAutomatic,true);assert.equal(snap.projects[1].approvalMode,'automatic');
+  await page.locator(`[data-project="${rememberedId}"]`).click();
+  await page.locator('[data-action="stop-automatic"]').click();
+  await until(async()=>!(await snapshot()).projects[1].writable,'persistent authority stopped after restart');
+  assert.equal((await snapshot()).projects[1].rememberAutomatic,false);
+  checks.push('restart preserves only explicit automatic opt-in, rotates secret and restores checkpoints');
   assert.deepEqual(errors,[]);
   const report={at:new Date().toISOString(),version:pkg.version,packaged,passed:true,durationMs:Date.now()-start,automaticWriteCallMs:writeCallMs,checks};
   await fs.writeFile(path.join(artifacts,label+'.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

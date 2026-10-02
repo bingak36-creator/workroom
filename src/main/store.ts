@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Project, Task, Job, Activity, Receipt } from '../shared';
 import { atomicPrivateWrite, readPrivateText } from './private-io';
 import { fingerprint, terminal } from './request';
+import { environmentNames } from './command-environment';
 
 export interface Data { version: 1; projects: Project[]; tasks: Task[]; jobs: Job[]; activity: Activity[]; receipts: Receipt[] }
 type Mutation = (draft: Data) => void;
@@ -11,11 +12,11 @@ const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const state = z.enum(['pending', 'queued', 'running', 'done', 'failed', 'declined', 'cancelled']);
 const schema = z.object({
   version: z.literal(1),
-  projects: z.array(z.object({ id, name: z.string().max(1024), path: z.string().max(8192), writable: z.boolean(), approvalMode: z.enum(['review', 'automatic', 'delete']).default('review'), approvedFolders: z.array(z.string().max(1024)).max(500).default([]) })).max(100),
+  projects: z.array(z.object({ id, name: z.string().max(1024), path: z.string().max(8192), writable: z.boolean(), approvalMode: z.enum(['review', 'automatic', 'delete']).default('review'), approvedFolders: z.array(z.string().max(1024)).max(500).default([]), environmentNames: environmentNames.default([]), rememberAutomatic: z.boolean().default(false) })).max(100),
   tasks: z.array(z.object({ id, projectId: id, title: z.string().max(120), objective: z.string().max(12000), status: z.enum(['todo','running','blocked','done']), summary: z.string().max(16000), createdAt: z.number(), updatedAt: z.number() })).max(2000),
   jobs: z.array(z.object({
     id, requestId: id, projectId: id, taskId: id.optional(), kind: z.enum(['write','delete','command','access']), state,
-    label: z.string().max(8000), path: z.string().max(1024).optional(), content: z.string().max(262144).optional(), expectedHash: digest.nullable().optional(), command: z.string().max(8000).optional(),
+    label: z.string().max(8000), path: z.string().max(1024).optional(), content: z.string().max(262144).optional(), expectedHash: digest.nullable().optional(), command: z.string().max(8000).optional(), environment: environmentNames.optional(),
     before: z.string().max(262144).optional(), requestHash: digest.optional(), resultHash: digest.optional(), approval: z.enum(['manual','automatic']).optional(),
     output: z.string().max(64000), exitCode: z.number().nullable().optional(), createdAt: z.number(), updatedAt: z.number()
   })).max(200),
@@ -41,10 +42,12 @@ export class Store extends EventEmitter {
     catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('작업 목록 파일을 읽을 수 없습니다. 원본을 보존했습니다.');
     }
-    // Restart never restores the authority to mutate or automatically executes old jobs.
+    // Only a user's explicit persistent opt-in restores authority. Old jobs are never replayed.
     for (const project of this.data.projects) {
-      project.writable = false;
-      if (project.approvalMode === 'automatic') project.approvalMode = 'review';
+      if (!(project.rememberAutomatic && project.writable && project.approvalMode === 'automatic' && project.approvedFolders?.length)) {
+        project.writable = false; project.rememberAutomatic = false;
+        if (project.approvalMode === 'automatic') project.approvalMode = 'review';
+      }
     }
     for (const job of this.data.jobs) {
       if (!job.requestHash && (job.kind === 'command' || job.content !== undefined)) job.requestHash = fingerprint(job);

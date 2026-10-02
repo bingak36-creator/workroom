@@ -1,11 +1,11 @@
-export const APP_VERSION = '0.3.0-rc.3';
+export const APP_VERSION = '0.3.0-rc.4';
 export type ApprovalMode = 'automatic' | 'delete' | 'review';
-export interface Project { id: string; name: string; path: string; writable: boolean; approvalMode?: ApprovalMode; approvedFolders?: string[] }
+export interface Project { id: string; name: string; path: string; writable: boolean; approvalMode?: ApprovalMode; approvedFolders?: string[]; environmentNames?: string[]; rememberAutomatic?: boolean }
 export interface Task { id: string; projectId: string; title: string; objective: string; status: 'todo' | 'running' | 'blocked' | 'done'; summary: string; createdAt: number; updatedAt: number }
 export interface Job {
   id: string; requestId: string; projectId: string; taskId?: string;
   kind: 'write' | 'delete' | 'command' | 'access'; state: 'pending' | 'queued' | 'running' | 'done' | 'failed' | 'declined' | 'cancelled';
-  label: string; path?: string; content?: string; expectedHash?: string | null; command?: string;
+  label: string; path?: string; content?: string; expectedHash?: string | null; command?: string; environment?: string[];
   before?: string; requestHash?: string; resultHash?: string; approval?: 'manual' | 'automatic';
   output: string; exitCode?: number | null; createdAt: number; updatedAt: number;
 }
@@ -25,6 +25,8 @@ export interface WorkroomAPI {
   snapshot(): Promise<Snapshot>; addProject(): Promise<Project | null>;
   setWritable(id: string, value: boolean): Promise<void>;
   setApprovalMode(id: string, mode: ApprovalMode): Promise<void>;
+  startAutomatic(id: string): Promise<void>; stopAutomatic(id: string): Promise<void>;
+  setEnvironmentNames(id: string, names: string[]): Promise<void>;
   approveFolder(id: string, relative: string): Promise<void>;
   revokeFolder(id: string, relative: string): Promise<void>;
   removeProject(id: string): Promise<void>; clearHistory(id: string): Promise<void>;

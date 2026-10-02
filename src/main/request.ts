@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Job } from '../shared';
 
 export interface TextEdit { oldText: string; newText: string }
-export type Proposal = Pick<Job, 'projectId' | 'taskId' | 'requestId' | 'kind' | 'path' | 'content' | 'expectedHash' | 'command'> & { edits?: TextEdit[] };
+export type Proposal = Pick<Job, 'projectId' | 'taskId' | 'requestId' | 'kind' | 'path' | 'content' | 'expectedHash' | 'command' | 'environment'> & { edits?: TextEdit[] };
 export const terminal = (state: Job['state']): boolean => !['pending', 'queued', 'running'].includes(state);
 
 /** A durable digest preserves retry identity after source text is purged. */
@@ -11,6 +11,7 @@ export function fingerprint(input: Partial<Proposal>): string {
   const values: unknown[] = fields.map(key => input[key] ?? null);
   // A patch is identified by its edits (its content is derived). Appending keeps existing receipts valid.
   if (input.edits) values.push(input.edits.map(edit => [edit.oldText, edit.newText]));
+  if (input.environment?.length) values.push(['environment', [...input.environment].sort()]);
   return createHash('sha256').update(JSON.stringify(values)).digest('hex');
 }
 

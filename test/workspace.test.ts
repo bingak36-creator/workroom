@@ -157,25 +157,23 @@ describe('Explicit approval modes and asynchronous execution',()=>{
     expect(work.job(j.id).content).toBeUndefined();expect(work.job(j.id).before).toBeUndefined();
   });
   it('requires manual approval for commands by default',async()=>{
-    await work.writable(projectId,true);const j=await command(process.platform==='win32'?"[System.IO.File]::WriteAllText('command.txt','approved')":'printf approved > command.txt');
+    if(process.platform!=='darwin')return;
+    await work.writable(projectId,true);const j=await command('printf approved > command.txt');
     expect(j.state).toBe('pending');await expect(fs.stat(path.join(temp,'project','command.txt'))).rejects.toThrow();
     await work.decide(j.id,true);expect((await completed(j.id)).exitCode).toBe(0);
     expect(await fs.readFile(path.join(temp,'project','command.txt'),'utf8')).toBe('approved');
   });
-  it('on Windows keeps automatic shell commands blocked and allows reviewed PowerShell',async()=>{
+  it('on Windows refuses shell commands even after manual approval would have been required',async()=>{
     if(process.platform!=='win32')return;
     await work.writable(projectId,true);
-    await work.setApprovalMode(projectId,'automatic');
-    await expect(command('Get-Content command.txt')).rejects.toThrow('폴더 격리');
+    for(const mode of ['automatic','delete','review'] as const){
+      await work.setApprovalMode(projectId,mode);
+      await expect(command('Get-Content command.txt')).rejects.toThrow('폴더 격리');
+    }
     expect(store.data.jobs).toHaveLength(0);
-    await work.setApprovalMode(projectId,'review');
-    const job=await command("[System.IO.File]::WriteAllText('reviewed.txt','ok')");
-    expect(job.state).toBe('pending');
-    await work.decide(job.id,true);
-    expect((await completed(job.id)).state).toBe('done');
-    expect(await fs.readFile(path.join(temp,'project','reviewed.txt'),'utf8')).toBe('ok');
   });
   it('rejecting a command has no command side effect',async()=>{
+    if(process.platform!=='darwin')return;
     await work.writable(projectId,true);const j=await command('touch forbidden');await work.decide(j.id,false);
     expect(work.job(j.id).state).toBe('declined');await expect(fs.stat(path.join(temp,'project','forbidden'))).rejects.toThrow();
   });
@@ -200,7 +198,8 @@ describe('Explicit approval modes and asynchronous execution',()=>{
     await work.cancel(j.id);expect((await completed(j.id)).state).toBe('cancelled');
   });
   it('duplicate approvals cannot execute a command twice',async()=>{
-    await work.writable(projectId,true);const j=await command(process.platform==='win32'?"[System.IO.File]::AppendAllText('count.txt','once')":'printf once >> count.txt');
+    if(process.platform!=='darwin')return;
+    await work.writable(projectId,true);const j=await command('printf once >> count.txt');
     const results=await Promise.allSettled([work.decide(j.id,true),work.decide(j.id,true)]);
     expect(results.filter(r=>r.status==='rejected')).toHaveLength(1);await completed(j.id);
     expect(await fs.readFile(path.join(temp,'project','count.txt'),'utf8')).toBe('once');
@@ -225,6 +224,7 @@ describe('Explicit approval modes and asynchronous execution',()=>{
     await expect(fs.stat(path.join(temp,'project','forbidden'))).rejects.toThrow();
   });
   it('pause fences new work and cancels manual approvals',async()=>{
+    if(process.platform!=='darwin')return;
     await work.writable(projectId,true);const j=await command('touch later');await work.setPaused(true);
     expect(work.job(j.id).state).toBe('cancelled');await expect(write()).rejects.toThrow('일시 정지');
   });
@@ -299,6 +299,7 @@ describe('Durability, idempotency and lifecycle',()=>{
     await expect(fs.stat(path.join(temp,'project','not-replayed'))).rejects.toThrow();
   });
   it('never evicts active requests when the visible history is full',async()=>{
+    if(process.platform!=='darwin')return;
     await work.writable(projectId,true);
     await store.update(d=>{for(let i=0;i<200;i++)d.jobs.push({...request(),id:randomUUID(),kind:'command',command:'true',label:'pending',state:'pending',output:'',createdAt:i,updatedAt:i});});
     await expect(command('true')).rejects.toThrow('200');expect(store.data.jobs).toHaveLength(200);expect(work.paused).toBe(false);
